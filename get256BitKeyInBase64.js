@@ -7,5 +7,5 @@ export function get256BitKeyInBase64() {
 	return btoa(binary);
 }
 
-const base64Key = generateBase64Key256();
+const base64Key = get256BitKeyInBase64();
 console.log('256-bittinen avain (Base64):', base64Key);

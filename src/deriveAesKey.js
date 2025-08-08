@@ -1,30 +1,23 @@
+export async function deriveAesKey(masterKeyB64, salt) {
+	if (!masterKeyB64) throw new Error('AES_MASTER_KEY missing');
+	if (!salt) throw new Error('salt missing');
 
+	const masterBytes = Uint8Array.from(atob(masterKeyB64), (c) => c.charCodeAt(0));
+	const saltBytes = typeof salt === 'string' ? Uint8Array.from(atob(salt), (c) => c.charCodeAt(0)) : salt;
+	const infoBytes = new Uint8Array(0);
 
-export async function deriveAesKey(masterKeyRawB64, saltRawB64) {
-  // dekoodaa base64→Uint8Array
-  const masterBytes = Uint8Array.from(atob(masterKeyRawB64), c => c.charCodeAt(0));
-  const saltBytes   = Uint8Array.from(atob(saltRawB64),   c => c.charCodeAt(0));
+	const masterKey = await crypto.subtle.importKey('raw', masterBytes, { name: 'HKDF' }, false, ['deriveKey']);
 
-  // tuo masterKey HMAC-pohjaiseksi KDF:lähteeksi
-  const masterKey = await crypto.subtle.importKey(
-    'raw', masterBytes,
-    { name: 'HKDF' },
-    false,
-    ['deriveKey']
-  );
-
-  // johda AES-GCM-256-avain
-  const aesKey = await crypto.subtle.deriveKey(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: saltBytes
-    },
-    masterKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt','decrypt']
-  );
-
-  return aesKey;
+	return crypto.subtle.deriveKey(
+		{
+			name: 'HKDF',
+			hash: 'SHA-256',
+			salt: saltBytes,
+			info: infoBytes,
+		},
+		masterKey,
+		{ name: 'AES-GCM', length: 256 },
+		false,
+		['encrypt', 'decrypt']
+	);
 }

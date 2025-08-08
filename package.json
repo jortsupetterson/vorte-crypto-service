@@ -3,11 +3,17 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"author": {
+		"email": "lehtinenjori03@gmail.com",
+		"name": "Jori Lehtinen",
+		"url": "https://vorte.app"
+	},
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev"
 	},
 	"devDependencies": {
-		"wrangler": "^4.28.0"
+		"wrangler": "^4.28.1",
+		"esbuild": "^0.25.8"
 	}
 }
