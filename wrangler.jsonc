@@ -1,13 +1,13 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "crypto-service-v0",
-	"main": "src/index.js",
-	"compatibility_date": "2025-08-06",
+	"main": "dist/index.js",
+	"compatibility_date": "2025-08-12",
 	"observability": {
 		"enabled": true
 	},
 	"placement": { "mode": "smart" },
-	"minify": false,
+	"minify": true,
 	"secrets_store_secrets": [
 		{
 			"binding": "AES_MASTER_KEY",

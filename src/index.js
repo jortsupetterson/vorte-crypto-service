@@ -80,12 +80,12 @@ export class VorteCryptoService extends WorkerEntrypoint {
 
 		this.ctx.waitUntil(this.env.CRYPTO_SALT_KV.put(saltId, saltB64));
 
-		return `${saltId}:${ivB64}:${ctB64}`;
+		return `${saltId}.${ivB64}.${ctB64}`;
 	}
 
 	async decryptPayload(cipherText) {
-		const [saltId, ivB64, ctB64] = cipherText.split(':');
-		if (!saltId || !ivB64 || !ctB64) throw new Error('Malformed ciphertext');
+		const [saltId, ivB64, ctB64] = cipherText.split('.');
+		if (!saltId || !ivB64 || !ctB64) throw new Error(`Malformed ciphertext`);
 
 		const saltB64 = await this.env.CRYPTO_SALT_KV.get(saltId);
 		if (!saltB64) throw new Error(`Salt not found for id ${saltId}`);
