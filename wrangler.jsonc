@@ -6,6 +6,8 @@
 	"observability": {
 		"enabled": true
 	},
+	"preview_urls": false,
+	"workers_dev": true,
 	"placement": { "mode": "smart" },
 	"minify": true,
 	"secrets_store_secrets": [

@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { deriveAesKey } from './deriveAesKey.js';
+import { getHmacKey } from './getHmacKey.js';
 
 export class VorteCryptoService extends WorkerEntrypoint {
 	async getNonce() {
@@ -18,13 +19,18 @@ export class VorteCryptoService extends WorkerEntrypoint {
 		const code = array[0] % 100_000_000;
 		return code.toString().padStart(8, '0');
 	}
+	async getCryptographicState(seed, secret) {
+		const key = await getHmacKey(secret);
+		const msg = seed instanceof Uint8Array ? seed : new TextEncoder().encode(typeof seed === 'string' ? seed : String(seed));
 
-	async getCryptographicState() {
-		const stateArray = new Uint8Array(16);
-		crypto.getRandomValues(stateArray);
-		const state = Array.from(stateArray)
-			.map((b) => b.toString(16).padStart(2, '0'))
-			.join('');
+		const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
+		const out16 = mac.subarray(0, 16);
+		let state = '';
+		for (let i = 0; i < out16.length; i++) {
+			const b = out16[i];
+			state += (b >>> 4).toString(16);
+			state += (b & 0x0f).toString(16);
+		}
 		return state;
 	}
 
