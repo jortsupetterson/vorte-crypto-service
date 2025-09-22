@@ -1,3 +1,4 @@
+const te = new TextEncoder();
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { deriveAesKey } from './deriveAesKey.js';
 import { getHmacKey } from './getHmacKey.js';
@@ -20,8 +21,8 @@ export class VorteCryptoService extends WorkerEntrypoint {
 		return code.toString().padStart(8, '0');
 	}
 	async getCryptographicState(seed, secret) {
-		const key = await getHmacKey(secret);
-		const msg = seed instanceof Uint8Array ? seed : new TextEncoder().encode(typeof seed === 'string' ? seed : String(seed));
+		const key = await getHmacKey(te, secret);
+		const msg = seed instanceof Uint8Array ? seed : te.encode(typeof seed === 'string' ? seed : String(seed));
 
 		const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
 		const out16 = mac.subarray(0, 16);
@@ -42,7 +43,7 @@ export class VorteCryptoService extends WorkerEntrypoint {
 			.replace(/\//g, '_')
 			.replace(/=+$/, '');
 
-		const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+		const buf = await crypto.subtle.digest('SHA-256', te.encode(verifier));
 		const challenge = btoa(String.fromCharCode(...new Uint8Array(buf)))
 			.replace(/\+/g, '-')
 			.replace(/\//g, '_')
@@ -52,7 +53,7 @@ export class VorteCryptoService extends WorkerEntrypoint {
 	}
 
 	async verifyProofKeyForCodeExchange(challenge, verifier) {
-		const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+		const digest = await crypto.subtle.digest('SHA-256', te.encode(verifier));
 		const computed = btoa(String.fromCharCode(...new Uint8Array(digest)))
 			.replace(/\+/g, '-')
 			.replace(/\//g, '_')
@@ -77,7 +78,7 @@ export class VorteCryptoService extends WorkerEntrypoint {
 		const masterB64 = await this.env.AES_MASTER_KEY.get();
 		const aesKey = await deriveAesKey(masterB64, saltB64);
 
-		const ptBytes = typeof plainText === 'string' ? new TextEncoder().encode(plainText) : plainText; // Uint8Array kelpaa
+		const ptBytes = typeof plainText === 'string' ? te.encode(plainText) : plainText; // Uint8Array kelpaa
 		const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, ptBytes);
 
 		const ivB64 = btoa(String.fromCharCode(...iv));
