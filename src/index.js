@@ -1,4 +1,11 @@
+let __aesMasterKeyCache;
+
 const te = new TextEncoder();
+const td = new TextDecoder();
+
+const MOD = 100_000_000;
+const LIMIT = 0x1_0000_0000 - (0x1_0000_0000 % MOD);
+
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { deriveAesKey } from './deriveAesKey.js';
 import { getHmacKey } from './getHmacKey.js';
@@ -7,37 +14,56 @@ export class VorteCryptoService extends WorkerEntrypoint {
 	async getNonce() {
 		const bytes = new Uint8Array(16);
 		crypto.getRandomValues(bytes);
-		let str = '';
-		for (const b of bytes) {
-			str += String.fromCharCode(b);
-		}
-		return btoa(str);
+		let s = '';
+		for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+		return btoa(s);
 	}
 
 	async getEightDigits() {
-		const array = new Uint32Array(1);
-		crypto.getRandomValues(array);
-		const code = array[0] % 100_000_000;
-		return code.toString().padStart(8, '0');
+		const buf = new Uint32Array(1);
+		// bias-free rejection sampling
+		// odotusarvo ~1.023 arvontaa
+		for (;;) {
+			crypto.getRandomValues(buf);
+			const x = buf[0];
+			if (x < LIMIT) {
+				const n = x % MOD;
+				return n.toString().padStart(8, '0');
+			}
+		}
 	}
-	async getCryptographicState(seed, secret) {
-		const key = await getHmacKey(te, secret);
-		const msg = seed instanceof Uint8Array ? seed : te.encode(typeof seed === 'string' ? seed : String(seed));
+
+	async getHashBasedMessageAuthenticationCode(seed, secret, bytes = 16, namespace = '') {
+		// clampataan bytes välille 1..32 (HMAC-SHA256 tuottaa 32 tavua)
+		bytes = Math.min(32, Math.max(1, bytes | 0));
+
+		const key = await getHmacKey(secret);
+
+		let msg = seed instanceof Uint8Array ? seed : te.encode(String(seed));
+		if (namespace && namespace.length) {
+			// kevyt domain-separaatio ilman ylikikkailua
+			const ns = te.encode(namespace + '\x1c');
+			const merged = new Uint8Array(ns.length + msg.length);
+			merged.set(ns, 0);
+			merged.set(msg, ns.length);
+			msg = merged;
+		}
 
 		const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
-		const out16 = mac.subarray(0, 16);
-		let state = '';
-		for (let i = 0; i < out16.length; i++) {
-			const b = out16[i];
-			state += (b >>> 4).toString(16);
-			state += (b & 0x0f).toString(16);
+		const out = mac.subarray(0, bytes);
+
+		// heksaus: nopea ja selkeä
+		let hex = '';
+		for (let i = 0; i < out.length; i++) {
+			hex += out[i].toString(16).padStart(2, '0');
 		}
-		return state;
+		return hex;
 	}
 
 	async getProofKeyForCodeExchange() {
 		const array = new Uint8Array(96);
 		crypto.getRandomValues(array);
+		// base64url ilman riippuvuuksia
 		const verifier = btoa(String.fromCharCode(...array))
 			.replace(/\+/g, '-')
 			.replace(/\//g, '_')
@@ -63,11 +89,9 @@ export class VorteCryptoService extends WorkerEntrypoint {
 
 	async get256BitKeyInBase64() {
 		const raw = crypto.getRandomValues(new Uint8Array(32));
-		let binary = '';
-		for (let i = 0; i < raw.length; i++) {
-			binary += String.fromCharCode(raw[i]);
-		}
-		return btoa(binary);
+		let s = '';
+		for (let i = 0; i < raw.length; i++) s += String.fromCharCode(raw[i]);
+		return btoa(s);
 	}
 
 	async encryptPayload(plainText) {
@@ -75,10 +99,13 @@ export class VorteCryptoService extends WorkerEntrypoint {
 		const salt = crypto.getRandomValues(new Uint8Array(16));
 		const saltB64 = btoa(String.fromCharCode(...salt));
 
-		const masterB64 = await this.env.AES_MASTER_KEY.get();
+		if (!__aesMasterKeyCache) {
+			__aesMasterKeyCache = await this.env.AES_MASTER_KEY.get();
+		}
+		const masterB64 = __aesMasterKeyCache;
 		const aesKey = await deriveAesKey(masterB64, saltB64);
 
-		const ptBytes = typeof plainText === 'string' ? te.encode(plainText) : plainText; // Uint8Array kelpaa
+		const ptBytes = typeof plainText === 'string' ? te.encode(plainText) : plainText;
 		const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, ptBytes);
 
 		const ivB64 = btoa(String.fromCharCode(...iv));
@@ -86,41 +113,40 @@ export class VorteCryptoService extends WorkerEntrypoint {
 		const saltId = btoa(`${Date.now()}${crypto.randomUUID()}`);
 
 		this.ctx.waitUntil(this.env.CRYPTO_SALT_KV.put(saltId, saltB64));
-
 		return `${saltId}.${ivB64}.${ctB64}`;
 	}
 
 	async decryptPayload(cipherText) {
 		const [saltId, ivB64, ctB64] = cipherText.split('.');
-		if (!saltId || !ivB64 || !ctB64) throw new Error(`Malformed ciphertext`);
+		if (!saltId || !ivB64 || !ctB64) throw new Error('Malformed ciphertext');
 
 		const saltB64 = await this.env.CRYPTO_SALT_KV.get(saltId);
 		if (!saltB64) throw new Error(`Salt not found for id ${saltId}`);
 
-		const masterB64 = await this.env.AES_MASTER_KEY.get();
+		if (!__aesMasterKeyCache) {
+			__aesMasterKeyCache = await this.env.AES_MASTER_KEY.get();
+		}
+		const masterB64 = __aesMasterKeyCache;
 		if (!masterB64) throw new Error('AES_MASTER_KEY missing');
 
-		const [iv, ct] = [Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0)), Uint8Array.from(atob(ctB64), (c) => c.charCodeAt(0))];
+		const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
+		const ct = Uint8Array.from(atob(ctB64), (c) => c.charCodeAt(0));
 
 		const aesKey = await deriveAesKey(masterB64, saltB64);
 		const ptBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct);
-		const pt = new TextDecoder().decode(ptBuf);
-		return {
-			plainText: pt,
-			saltId: saltId,
-		};
+		const pt = td.decode(ptBuf);
+
+		return { plainText: pt, saltId };
 	}
 }
 
 export default {
 	async fetch(request, env, ctx) {
-		const cached = caches.default.match(request);
+		const cached = await caches.default.match(request);
 		if (cached) return cached;
 		const response = new Response(null, {
 			status: 404,
-			headers: {
-				'cache-control': 'public, max-age=31536000, immutable',
-			},
+			headers: { 'cache-control': 'public, max-age=31536000, immutable' },
 		});
 		ctx.waitUntil(caches.default.put(request, response.clone()));
 		return response;
